@@ -3,9 +3,11 @@
 package sftp
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
+	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -84,5 +86,60 @@ func TestParseUsage(t *testing.T) {
 	} {
 		gotSpaceTotal, gotSpaceUsed, gotSpaceAvail := parseUsage([]byte(test.sshOutput))
 		assert.Equal(t, test.usage, [3]int64{gotSpaceTotal, gotSpaceUsed, gotSpaceAvail}, fmt.Sprintf("Test %d sshOutput = %q", i, test.sshOutput))
+	}
+}
+
+func TestWrapSftpError(t *testing.T) {
+	tests := []struct {
+		name          string
+		operation     string
+		err           error
+		expectNil     bool
+		expectContains []string
+	}{
+		{
+			name:      "nil error",
+			operation: "test",
+			err:       nil,
+			expectNil: true,
+		},
+		{
+			name:      "regular error",
+			operation: "open file",
+			err:       errors.New("file not found"),
+			expectNil: false,
+			expectContains: []string{"open file:", "file not found"},
+		},
+		{
+			name:      "SFTP StatusError",
+			operation: "remove file", 
+			err:       &sftp.StatusError{Code: 3}, // SSH_FX_NO_SUCH_FILE
+			expectNil: false,
+			expectContains: []string{"remove file:", "SFTP error", "code 3"},
+		},
+		{
+			name:      "SFTP StatusError permission denied",
+			operation: "mkdir failed", 
+			err:       &sftp.StatusError{Code: 4}, // SSH_FX_PERMISSION_DENIED
+			expectNil: false,
+			expectContains: []string{"mkdir failed:", "SFTP error", "code 4"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := wrapSftpError(test.operation, test.err)
+			if test.expectNil {
+				assert.Nil(t, result)
+			} else {
+				assert.NotNil(t, result)
+				for _, expectedPart := range test.expectContains {
+					assert.Contains(t, result.Error(), expectedPart, 
+						"Expected error message to contain '%s', got: %s", expectedPart, result.Error())
+				}
+				// Verify that original error is wrapped
+				assert.ErrorIs(t, result, test.err)
+			}
+		})
 	}
 }
