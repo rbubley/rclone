@@ -1473,7 +1473,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 	f.putSftpConnection(&c, err)
 	if err != nil {
-		return nil, fmt.Errorf("Move Rename failed: %w", err)
+		return nil, wrapSftpError("Move Rename failed", err)
 	}
 	dstObj, err := f.NewObject(ctx, remote)
 	if err != nil {
@@ -1510,7 +1510,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 				return nil, fs.ErrorCantCopy
 			}
 		}
-		return nil, fmt.Errorf("Copy failed: %w", err)
+		return nil, wrapSftpError("Copy failed", err)
 	}
 	dstObj, err := f.NewObject(ctx, remote)
 	if err != nil {
@@ -1562,7 +1562,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	)
 	f.putSftpConnection(&c, err)
 	if err != nil {
-		return fmt.Errorf("DirMove Rename(%q,%q) failed: %w", srcPath, dstPath, err)
+		return wrapSftpError(fmt.Sprintf("DirMove Rename(%q,%q) failed", srcPath, dstPath), err)
 	}
 	return nil
 }
