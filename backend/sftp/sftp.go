@@ -51,6 +51,22 @@ var (
 	unixShellEscapeRegex = regexp.MustCompile("[^A-Za-z0-9_.,:/\\@\u0080-\uFFFFFFFF\n-]")
 )
 
+// wrapSftpError enhances SFTP errors with status code and message details for better diagnostics
+func wrapSftpError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	
+	// Check if this is an SFTP StatusError and enhance it with detailed information
+	if sftpErr, ok := err.(*sftp.StatusError); ok {
+		// Include both the status code and the original error message for better diagnostics
+		return fmt.Errorf("%s: SFTP error (code %d): %w", operation, sftpErr.Code, err)
+	}
+	
+	// For other errors, just wrap with operation context
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
 func init() {
 	fsi := &fs.RegInfo{
 		Name:        "sftp",
@@ -1259,7 +1275,7 @@ func (f *Fs) dirExists(ctx context.Context, dir string) (bool, error) {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("dirExists stat failed: %w", err)
+		return false, wrapSftpError("dirExists stat failed", err)
 	}
 	if !info.IsDir() {
 		return false, fs.ErrorIsFile
@@ -1292,7 +1308,7 @@ func (f *Fs) List(ctx context.Context, dir string) (entries fs.DirEntries, err e
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fs.ErrorDirNotFound
 		}
-		return nil, fmt.Errorf("error listing %q: %w", dir, err)
+		return nil, wrapSftpError(fmt.Sprintf("error listing %q", dir), err)
 	}
 	for _, info := range infos {
 		remote := path.Join(dir, info.Name())
@@ -1387,7 +1403,7 @@ func (f *Fs) mkdir(ctx context.Context, dirPath string) error {
 			fs.Debugf(f, "directory %q exists after Mkdir is attempted", dirPath)
 			return nil
 		}
-		return fmt.Errorf("mkdir %q failed: %w", dirPath, err)
+		return wrapSftpError(fmt.Sprintf("mkdir %q", dirPath), err)
 	}
 	return nil
 }
@@ -1426,7 +1442,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 	}
 	err = c.sftpClient.RemoveDirectory(root)
 	f.putSftpConnection(&c, err)
-	return err
+	return wrapSftpError("Rmdir failed", err)
 }
 
 // Move renames a remote sftp file object
@@ -1457,7 +1473,7 @@ func (f *Fs) Move(ctx context.Context, src fs.Object, remote string) (fs.Object,
 	}
 	f.putSftpConnection(&c, err)
 	if err != nil {
-		return nil, fmt.Errorf("Move Rename failed: %w", err)
+		return nil, wrapSftpError("Move Rename failed", err)
 	}
 	dstObj, err := f.NewObject(ctx, remote)
 	if err != nil {
@@ -1494,7 +1510,7 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 				return nil, fs.ErrorCantCopy
 			}
 		}
-		return nil, fmt.Errorf("Copy failed: %w", err)
+		return nil, wrapSftpError("Copy failed", err)
 	}
 	dstObj, err := f.NewObject(ctx, remote)
 	if err != nil {
@@ -1546,7 +1562,7 @@ func (f *Fs) DirMove(ctx context.Context, src fs.Fs, srcRemote, dstRemote string
 	)
 	f.putSftpConnection(&c, err)
 	if err != nil {
-		return fmt.Errorf("DirMove Rename(%q,%q) failed: %w", srcPath, dstPath, err)
+		return wrapSftpError(fmt.Sprintf("DirMove Rename(%q,%q) failed", srcPath, dstPath), err)
 	}
 	return nil
 }
@@ -1989,6 +2005,9 @@ func (f *Fs) stat(ctx context.Context, remote string) (info os.FileInfo, err err
 	}
 	info, err = c.sftpClient.Stat(absPath)
 	f.putSftpConnection(&c, err)
+	if err != nil {
+		err = wrapSftpError("stat failed", err)
+	}
 	return info, err
 }
 
@@ -2110,7 +2129,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 	sftpFile, err := c.sftpClient.Open(o.path())
 	o.fs.putSftpConnection(&c, err)
 	if err != nil {
-		return nil, fmt.Errorf("Open failed: %w", err)
+		return nil, wrapSftpError("Open failed", err)
 	}
 	if offset > 0 {
 		off, err := sftpFile.Seek(offset, io.SeekStart)
@@ -2214,7 +2233,7 @@ func (o *Object) Remove(ctx context.Context) error {
 	}
 	err = c.sftpClient.Remove(o.path())
 	o.fs.putSftpConnection(&c, err)
-	return err
+	return wrapSftpError("Remove failed", err)
 }
 
 // Check the interfaces are satisfied
